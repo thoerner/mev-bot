@@ -258,16 +258,39 @@ class ArbitrageDetector {
       // Calculate gas estimate (rough estimate)
       const estimatedGas = 300000; // 2 swaps + overhead
       
-      // Calculate minimum trade amount to be profitable
-      const gasPrice = 25; // 25 gwei
-      const gasUsed = estimatedGas * gasPrice * 1e-9; // Convert to AVAX
-      const minTradeAmount = gasUsed / (priceGap / buyPrice); // Min amount to cover gas
-      
-      // Calculate max trade amount based on pool liquidity
+      // Calculate max trade amount based on pool liquidity FIRST
       const maxTradeAmount = Math.min(
         this.getMaxTradeAmount(pool1.reserves, tokenA, tokenB),
         this.getMaxTradeAmount(pool2.reserves, tokenA, tokenB)
       );
+      
+      // Skip if no liquidity
+      if (maxTradeAmount <= 0) return null;
+      
+      // Calculate minimum trade amount to be profitable (improved calculation)
+      const gasPrice = 25; // 25 gwei
+      const gasCostInAVAX = estimatedGas * gasPrice * 1e-9; // Convert to AVAX
+      
+      // Convert gas cost to tokenA equivalent if needed
+      let gasCostInTokenA = gasCostInAVAX;
+      if (tokenA !== TOKENS.WAVAX) {
+        // For non-AVAX tokens, estimate gas cost in token terms
+        // This is a rough approximation - in reality you'd need current AVAX/tokenA price
+        gasCostInTokenA = gasCostInAVAX / buyPrice; // Rough conversion
+      }
+      
+      // Min trade amount = gas cost / profit margin
+      const profitMargin = priceGap / buyPrice;
+      const minTradeAmount = Math.max(
+        gasCostInTokenA / profitMargin, // Amount needed to cover gas
+        maxTradeAmount * 0.01 // At least 1% of max liquidity
+      );
+      
+      // Filter out opportunities where min > max (not executable)
+      if (minTradeAmount > maxTradeAmount) {
+        console.log(`⚠️  Skipping unexecutable opportunity: ${this.getTokenSymbol(tokenA)}/${this.getTokenSymbol(tokenB)} (min: ${minTradeAmount.toFixed(4)}, max: ${maxTradeAmount.toFixed(4)})`);
+        return null;
+      }
       
       return {
         tokenA,
@@ -332,11 +355,33 @@ class ArbitrageDetector {
       const token0 = reserves.token0.toLowerCase();
       const tokenAAddr = tokenA.toLowerCase();
       
-      // Use 5% of the pool's liquidity as max trade amount
+      // Get the relevant reserve for tokenA
       const relevantReserve = token0 === tokenAAddr ? reserves.reserve0 : reserves.reserve1;
       const decimals = TOKEN_DECIMALS[tokenA] || 18;
       
-      return Number(relevantReserve) * 0.05 / (10 ** decimals);
+      // Convert reserve to human-readable format
+      const reserveAmount = Number(relevantReserve) / (10 ** decimals);
+      
+      // Use a more conservative approach for max trade amount
+      // For large pools (>1000 tokens), use 2%
+      // For medium pools (100-1000 tokens), use 5%
+      // For small pools (<100 tokens), use 10%
+      let maxTradePercent;
+      if (reserveAmount > 1000) {
+        maxTradePercent = 0.02; // 2%
+      } else if (reserveAmount > 100) {
+        maxTradePercent = 0.05; // 5%
+      } else {
+        maxTradePercent = 0.10; // 10%
+      }
+      
+      const maxAmount = reserveAmount * maxTradePercent;
+      
+      // Set reasonable bounds
+      const minMaxAmount = 0.001; // At least 0.001 tokens
+      const maxMaxAmount = tokenA === TOKENS.WAVAX ? 10 : 1000; // Max 10 AVAX or 1000 tokens
+      
+      return Math.max(minMaxAmount, Math.min(maxAmount, maxMaxAmount));
       
     } catch (error) {
       console.error("❌ Error calculating max trade amount:", error);
@@ -359,13 +404,37 @@ class ArbitrageDetector {
     console.log(`⏰ Timestamp: ${new Date(opportunity.timestamp).toISOString()}`);
     console.log("─".repeat(50));
     
-    // Store in Redis for potential execution
-    if (opportunity.profitPercent > 0.5 && this.redisClient.isOpen) { // Only store high-profit opportunities
-      await this.redisClient.setEx(
-        `${MEV_CONFIG.REDIS_KEY_PREFIX}opportunity:${opportunity.tokenA}-${opportunity.tokenB}-${opportunity.timestamp}`,
-        30, // 30 second TTL
-        JSON.stringify(opportunity)
-      );
+    // Store in Redis for potential execution (only high-profit opportunities)
+    if (opportunity.profitPercent > 0.5 && this.redisClient.isOpen) {
+      // Use stable key without timestamp to avoid duplicates
+      const stableKey = `${MEV_CONFIG.REDIS_KEY_PREFIX}opportunity:${opportunity.tokenA}-${opportunity.tokenB}-${opportunity.buyDex}-${opportunity.sellDex}`;
+      
+      try {
+        // Check if this opportunity already exists
+        const existingData = await this.redisClient.get(stableKey);
+        let shouldUpdate = true;
+        
+        if (existingData) {
+          const existingOpportunity = JSON.parse(existingData);
+          
+          // Only update if profit changed by more than 0.1% to avoid spam
+          const profitDiff = Math.abs(opportunity.profitPercent - existingOpportunity.profitPercent);
+          if (profitDiff < 0.1) {
+            shouldUpdate = false;
+          }
+        }
+        
+        if (shouldUpdate) {
+          await this.redisClient.setEx(
+            stableKey,
+            60, // 1 minute TTL (longer than before)
+            JSON.stringify(opportunity)
+          );
+        }
+        
+      } catch (error) {
+        console.error(`❌ Error storing opportunity in Redis: ${error}`);
+      }
     }
   }
   

@@ -18,12 +18,16 @@ interface TransactionBundle {
 }
 
 class BundleSimulator {
-  private anvilProcess: ChildProcess | null = null;
+  private mainProvider: ethers.JsonRpcProvider;
   private simulationProvider: ethers.JsonRpcProvider | null = null;
-  private forkBlockNumber: number | null = null;
+  private anvilProcess: ChildProcess | null = null;
+  private forkBlockNumber: number = 0;
   private simulationRpcUrl = "http://127.0.0.1:8545";
-  private readonly mainProvider: ethers.JsonRpcProvider;
   
+  // Cooldown tracking to prevent spamming the same opportunity
+  private simulationCooldowns: Map<string, number> = new Map();
+  private readonly SIMULATION_COOLDOWN_MS = 30000; // 30 seconds cooldown per opportunity
+
   constructor() {
     this.mainProvider = new ethers.JsonRpcProvider(CURRENT_NETWORK.rpcUrl);
   }
@@ -92,14 +96,14 @@ class BundleSimulator {
     }
     
     // Handle process events
-    this.anvilProcess.stdout?.on("data", (data) => {
+    this.anvilProcess.stdout?.on("data", (data: Buffer) => {
       const output = data.toString();
       if (output.includes("Listening on")) {
         console.log("✅ Anvil fork started successfully");
       }
     });
     
-    this.anvilProcess.stderr?.on("data", (data) => {
+    this.anvilProcess.stderr?.on("data", (data: Buffer) => {
       const errorOutput = data.toString();
       if (errorOutput.includes("Address already in use")) {
         console.error("❌ Anvil error: Address already in use (os error 98)");
@@ -108,7 +112,7 @@ class BundleSimulator {
       }
     });
     
-    this.anvilProcess.on("exit", (code) => {
+    this.anvilProcess.on("exit", (code: number | null) => {
       console.log(`🛑 Anvil process exited with code ${code}`);
       this.anvilProcess = null;
     });
@@ -854,6 +858,17 @@ class BundleSimulator {
              
              // Only simulate profitable opportunities
              if (opportunity.profitPercent > 0.1) { // At least 0.1% profit
+               // Check cooldown to prevent spamming the same opportunity
+               const cooldownKey = `${opportunity.tokenA}-${opportunity.tokenB}-${opportunity.buyDex}-${opportunity.sellDex}`;
+               const lastSimulation = this.simulationCooldowns.get(cooldownKey) || 0;
+               const now = Date.now();
+               
+               if (now - lastSimulation < this.SIMULATION_COOLDOWN_MS) {
+                 const remainingCooldown = Math.ceil((this.SIMULATION_COOLDOWN_MS - (now - lastSimulation)) / 1000);
+                 console.log(`⏳ Opportunity ${opportunity.tokenA}/${opportunity.tokenB} on cooldown for ${remainingCooldown}s`);
+                 continue;
+               }
+               
                console.log(`\n🎯 Simulating opportunity: ${opportunity.tokenA}/${opportunity.tokenB}`);
                console.log(`   Profit: ${opportunity.profitPercent.toFixed(2)}%`);
                console.log(`   Buy: ${opportunity.buyDex} → Sell: ${opportunity.sellDex}`);
@@ -864,6 +879,9 @@ class BundleSimulator {
                  await this.resetFork();
                  
                  const result = await this.simulateArbitrageOpportunity(opportunity);
+                 
+                 // Update cooldown after simulation
+                 this.simulationCooldowns.set(cooldownKey, now);
                  
                  if (result.success) {
                    console.log(`✅ Simulation successful!`);
