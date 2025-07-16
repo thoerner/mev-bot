@@ -100,8 +100,10 @@ async function testFoundryInstallation() {
 async function testMempoolListener() {
   console.log("\n🔍 Testing Mempool Listener...");
   
+  let listener: MempoolListener | null = null;
+  
   try {
-    const listener = new MempoolListener();
+    listener = new MempoolListener();
     await listener.start();
     
     console.log("✅ Mempool listener started successfully");
@@ -118,6 +120,13 @@ async function testMempoolListener() {
     return true;
   } catch (error) {
     console.error(`❌ Mempool listener test failed: ${error}`);
+    if (listener) {
+      try {
+        await listener.stop();
+      } catch (stopError) {
+        console.error(`❌ Error stopping mempool listener: ${stopError}`);
+      }
+    }
     return false;
   }
 }
@@ -125,8 +134,10 @@ async function testMempoolListener() {
 async function testArbitrageDetector() {
   console.log("\n🔍 Testing Arbitrage Detector...");
   
+  let detector: ArbitrageDetector | null = null;
+  
   try {
-    const detector = new ArbitrageDetector();
+    detector = new ArbitrageDetector();
     await detector.start();
     
     console.log("✅ Arbitrage detector started successfully");
@@ -148,6 +159,13 @@ async function testArbitrageDetector() {
     return true;
   } catch (error) {
     console.error(`❌ Arbitrage detector test failed: ${error}`);
+    if (detector) {
+      try {
+        await detector.stop();
+      } catch (stopError) {
+        console.error(`❌ Error stopping arbitrage detector: ${stopError}`);
+      }
+    }
     return false;
   }
 }
@@ -155,13 +173,16 @@ async function testArbitrageDetector() {
 async function testBundleSimulator() {
   console.log("\n🔍 Testing Bundle Simulator...");
   
+  let simulator: BundleSimulator | null = null;
+  
   try {
-    const simulator = new BundleSimulator();
+    simulator = new BundleSimulator();
     await simulator.start();
     
     console.log("✅ Bundle simulator started successfully");
     
     // Test simple swap simulation
+    console.log("🧪 Testing simple swap simulation...");
     const result = await simulator.testSimpleSwap();
     
     console.log("✅ Bundle simulation completed");
@@ -175,6 +196,13 @@ async function testBundleSimulator() {
     return result.success;
   } catch (error) {
     console.error(`❌ Bundle simulator test failed: ${error}`);
+    if (simulator) {
+      try {
+        await simulator.stop();
+      } catch (stopError) {
+        console.error(`❌ Error stopping bundle simulator: ${stopError}`);
+      }
+    }
     return false;
   }
 }
@@ -200,6 +228,12 @@ async function runFullTest() {
     } catch (error) {
       console.error(`❌ ${name} test crashed: ${error}`);
       results[name] = false;
+    }
+    
+    // Add delay between tests to prevent resource conflicts
+    if (name !== "Bundle Simulator") { // Skip delay after last test
+      console.log("⏳ Waiting 3 seconds before next test...");
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
   }
   

@@ -48,6 +48,10 @@ class ArbitrageDetector {
   // DEX factory contracts
   private factories: { [name: string]: ethers.Contract } = {};
   
+  // Interval references for cleanup
+  private reserveUpdateInterval?: NodeJS.Timeout;
+  private opportunityCheckInterval?: NodeJS.Timeout;
+  
   constructor() {
     this.provider = new ethers.JsonRpcProvider(CURRENT_NETWORK.rpcUrl);
     this.redisClient = createClient({
@@ -131,12 +135,21 @@ class ArbitrageDetector {
       
       this.reservesCache.set(cacheKey, poolReserves);
       
-      // Store in Redis with TTL
-      await this.redisClient.setEx(
-        `${MEV_CONFIG.REDIS_KEY_PREFIX}reserves:${cacheKey}`,
-        60, // 1 minute TTL
-        JSON.stringify(poolReserves)
-      );
+      // Store in Redis with TTL (convert BigInt to string)
+      const serializable = {
+        ...poolReserves,
+        reserve0: poolReserves.reserve0.toString(),
+        reserve1: poolReserves.reserve1.toString()
+      };
+      
+      // Store in Redis if connected
+      if (this.redisClient.isOpen) {
+        await this.redisClient.setEx(
+          `${MEV_CONFIG.REDIS_KEY_PREFIX}reserves:${cacheKey}`,
+          60, // 1 minute TTL
+          JSON.stringify(serializable)
+        );
+      }
       
     } catch (error) {
       console.error(`❌ Error updating reserves for ${cacheKey}:`, error);
@@ -147,13 +160,17 @@ class ArbitrageDetector {
     console.log("🔍 Starting arbitrage monitoring...");
     
     // Update reserves every 5 seconds
-    setInterval(async () => {
-      await this.updateAllReserves();
+    this.reserveUpdateInterval = setInterval(async () => {
+      if (this.isRunning) {
+        await this.updateAllReserves();
+      }
     }, 5000);
     
     // Check for arbitrage opportunities every 2 seconds
-    setInterval(async () => {
-      await this.checkArbitrageOpportunities();
+    this.opportunityCheckInterval = setInterval(async () => {
+      if (this.isRunning) {
+        await this.checkArbitrageOpportunities();
+      }
     }, 2000);
   }
   
@@ -343,7 +360,7 @@ class ArbitrageDetector {
     console.log("─".repeat(50));
     
     // Store in Redis for potential execution
-    if (opportunity.profitPercent > 0.5) { // Only store high-profit opportunities
+    if (opportunity.profitPercent > 0.5 && this.redisClient.isOpen) { // Only store high-profit opportunities
       await this.redisClient.setEx(
         `${MEV_CONFIG.REDIS_KEY_PREFIX}opportunity:${opportunity.tokenA}-${opportunity.tokenB}-${opportunity.timestamp}`,
         30, // 30 second TTL
@@ -367,23 +384,49 @@ class ArbitrageDetector {
   async stop() {
     console.log("🛑 Stopping arbitrage detector...");
     this.isRunning = false;
-    await this.redisClient.quit();
+    
+    // Clear intervals
+    if (this.reserveUpdateInterval) {
+      clearInterval(this.reserveUpdateInterval);
+      this.reserveUpdateInterval = undefined;
+    }
+    
+    if (this.opportunityCheckInterval) {
+      clearInterval(this.opportunityCheckInterval);
+      this.opportunityCheckInterval = undefined;
+    }
+    
+    // Close Redis connection if it's still open
+    if (this.redisClient.isOpen) {
+      await this.redisClient.quit();
+    }
+    
     console.log("✅ Arbitrage detector stopped");
   }
   
   // Public method to get current arbitrage opportunities
   async getCurrentOpportunities(): Promise<ArbitrageOpportunity[]> {
-    const keys = await this.redisClient.keys(`${MEV_CONFIG.REDIS_KEY_PREFIX}opportunity:*`);
-    const opportunities: ArbitrageOpportunity[] = [];
-    
-    for (const key of keys) {
-      const data = await this.redisClient.get(key);
-      if (data) {
-        opportunities.push(JSON.parse(data));
-      }
+    if (!this.redisClient.isOpen) {
+      console.log("⚠️  Redis client is not connected, returning empty opportunities");
+      return [];
     }
     
-    return opportunities.sort((a, b) => b.profitPercent - a.profitPercent);
+    try {
+      const keys = await this.redisClient.keys(`${MEV_CONFIG.REDIS_KEY_PREFIX}opportunity:*`);
+      const opportunities: ArbitrageOpportunity[] = [];
+      
+      for (const key of keys) {
+        const data = await this.redisClient.get(key);
+        if (data) {
+          opportunities.push(JSON.parse(data));
+        }
+      }
+      
+      return opportunities.sort((a, b) => b.profitPercent - a.profitPercent);
+    } catch (error) {
+      console.error("❌ Error getting opportunities from Redis:", error);
+      return [];
+    }
   }
 }
 

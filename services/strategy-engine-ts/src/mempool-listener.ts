@@ -293,7 +293,11 @@ class MempoolListener {
     this.isRunning = false;
     
     this.wsProvider.destroy();
-    await this.redisClient.quit();
+    
+    // Close Redis connection if it's still open
+    if (this.redisClient.isOpen) {
+      await this.redisClient.quit();
+    }
     
     console.log("✅ Mempool listener stopped");
   }

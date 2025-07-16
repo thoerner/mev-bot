@@ -20,7 +20,7 @@ class BundleSimulator {
   private anvilProcess: ChildProcess | null = null;
   private simulationProvider: ethers.JsonRpcProvider | null = null;
   private forkBlockNumber: number | null = null;
-  private readonly simulationRpcUrl = "http://127.0.0.1:8545";
+  private simulationRpcUrl = "http://127.0.0.1:8545";
   private readonly mainProvider: ethers.JsonRpcProvider;
   
   constructor() {
@@ -43,16 +43,38 @@ class BundleSimulator {
     // Create simulation provider
     this.simulationProvider = new ethers.JsonRpcProvider(this.simulationRpcUrl);
     
+    // Wait a bit more for Anvil to be fully ready
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
     console.log("✅ Bundle simulator is ready");
   }
   
+  private async findAvailablePort(startPort: number): Promise<number> {
+    const net = require('net');
+    
+    return new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.listen(startPort, () => {
+        const port = server.address().port;
+        server.close(() => resolve(port));
+      });
+      server.on('error', () => {
+        // Try next port
+        resolve(this.findAvailablePort(startPort + 1));
+      });
+    });
+  }
+
   private async startAnvilFork() {
     console.log("🔄 Starting Anvil fork...");
+    
+    // Try to find an available port
+    const port = await this.findAvailablePort(8545);
     
     const anvilArgs = [
       "--fork-url", CURRENT_NETWORK.rpcUrl,
       "--fork-block-number", (this.forkBlockNumber! - 2).toString(), // Fork 2 blocks behind for safety
-      "--port", "8545",
+      "--port", port.toString(),
       "--host", "127.0.0.1",
       "--accounts", "10",
       "--balance", "1000000", // 1M ETH per account
@@ -77,13 +99,21 @@ class BundleSimulator {
     });
     
     this.anvilProcess.stderr?.on("data", (data) => {
-      console.error("❌ Anvil error:", data.toString());
+      const errorOutput = data.toString();
+      if (errorOutput.includes("Address already in use")) {
+        console.error("❌ Anvil error: Address already in use (os error 98)");
+      } else {
+        console.error("❌ Anvil error:", errorOutput);
+      }
     });
     
     this.anvilProcess.on("exit", (code) => {
       console.log(`🛑 Anvil process exited with code ${code}`);
       this.anvilProcess = null;
     });
+    
+    // Update simulation provider URL with the correct port
+    this.simulationRpcUrl = `http://127.0.0.1:${port}`;
   }
   
   private async waitForAnvil(timeout = 30000) {
@@ -324,20 +354,41 @@ class BundleSimulator {
   async testSimpleSwap(): Promise<SimulationResult> {
     console.log("🧪 Testing simple swap simulation...");
     
-    // Create a simple WAVAX -> USDC swap bundle
+    if (!this.simulationProvider) {
+      throw new Error("Simulation provider not initialized");
+    }
+    
+    // Create test wallet
+    const testWallet = new ethers.Wallet(
+      "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+      this.simulationProvider
+    );
+    
+    // Create router contract instance
+    const routerAddress = "0x60aE616a2155Ee3d9A68541Ba4544862310933d4"; // TraderJoe Router
+    const routerContract = new ethers.Contract(routerAddress, ABIS.UNISWAP_V2_ROUTER, testWallet);
+    
+    // Setup swap parameters
+    const amountIn = ethers.parseEther("1"); // 1 AVAX
+    const amountOutMin = 0; // Accept any amount of tokens out
+    const path = [TOKENS.WAVAX, TOKENS.USDC];
+    const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
+    
+    // Create properly encoded transaction data
+    const swapData = routerContract.interface.encodeFunctionData("swapExactAVAXForTokens", [
+      amountOutMin,
+      path,
+      testWallet.address,
+      deadline
+    ]);
+    
     const bundle: TransactionBundle = {
       transactions: [
         {
-          to: "0x60aE616a2155Ee3d9A68541Ba4544862310933d4", // TraderJoe Router
-          value: ethers.parseEther("1"), // 1 AVAX
-          data: "0x7ff36ab5" + // swapExactAVAXForTokens function selector
-                "0000000000000000000000000000000000000000000000000000000000000000" + // amountOutMin
-                "0000000000000000000000000000000000000000000000000000000000000080" + // path offset
-                "000000000000000000000000ac0974bec39a17e36ba4a6b4d238ff944bacb478" + // to address
-                "00000000000000000000000000000000000000000000000000000000" + Math.floor(Date.now() / 1000 + 300).toString(16).padStart(8, '0') + // deadline
-                "0000000000000000000000000000000000000000000000000000000000000002" + // path length
-                "000000000000000000000000b31f66aa3c1e785363f0875a1b74e27b85fd66c7" + // WAVAX
-                "000000000000000000000000b97ef9ef8734c71904d8002f8b6bc66dd9c48a6e"   // USDC
+          to: routerAddress,
+          value: amountIn,
+          data: swapData,
+          gasLimit: 300000
         }
       ],
       expectedProfit: "0",
