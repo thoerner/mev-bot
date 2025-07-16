@@ -59,13 +59,14 @@ export const ARBITRAGE_PAIRS = [
 
 // MEV Configuration
 export const MEV_CONFIG = {
-  MIN_PROFIT_THRESHOLD: 0.001, // Minimum profit in ETH to execute
+  MIN_PROFIT_THRESHOLD: 0.001, // Minimum profit in AVAX to execute
   MAX_SLIPPAGE: 0.03, // 3% max slippage
   GAS_LIMIT: 500000,
   PRIORITY_FEE_MULTIPLIER: 1.2,
   REDIS_KEY_PREFIX: "mev:",
   MEMPOOL_TTL: 300, // 5 minutes
   SIMULATION_TIMEOUT: 150, // 150ms max simulation time
+  FAST_SIMULATION: true, // Use fast mode for simulations (prioritizes speed over precision)
 };
 
 // ABIs

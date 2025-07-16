@@ -260,7 +260,7 @@ class ArbitrageDetector {
       
       // Calculate minimum trade amount to be profitable
       const gasPrice = 25; // 25 gwei
-      const gasUsed = estimatedGas * gasPrice * 1e-9; // Convert to ETH
+      const gasUsed = estimatedGas * gasPrice * 1e-9; // Convert to AVAX
       const minTradeAmount = gasUsed / (priceGap / buyPrice); // Min amount to cover gas
       
       // Calculate max trade amount based on pool liquidity

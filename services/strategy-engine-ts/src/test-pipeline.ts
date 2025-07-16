@@ -181,9 +181,22 @@ async function testBundleSimulator() {
     
     console.log("✅ Bundle simulator started successfully");
     
-    // Test simple swap simulation
-    console.log("🧪 Testing simple swap simulation...");
-    const result = await simulator.testSimpleSwap();
+    // Test simple swap simulation in fast mode (default)
+    console.log("🧪 Testing simple swap simulation (fast mode)...");
+    const simpleResult = await simulator.testSimpleSwap();
+    
+    console.log("📊 Simple swap result (fast mode):");
+    console.log(`   Success: ${simpleResult.success}`);
+    console.log(`   Gas Used: ${simpleResult.gasUsed.toLocaleString()}`);
+    console.log(`   Profit: ${ethers.formatEther(simpleResult.profit)} AVAX`);
+    console.log(`   Execution Time: ${simpleResult.executionTime}ms (optimized for speed)`);
+    
+    // Reset simulation environment between tests
+    await simulator.resetSimulation();
+    
+    // Test arbitrage simulation
+    console.log("\n🎯 Testing arbitrage simulation...");
+    const result = await simulator.testArbitrageSimulation();
     
     console.log("✅ Bundle simulation completed");
     console.log(`   Success: ${result.success}`);
