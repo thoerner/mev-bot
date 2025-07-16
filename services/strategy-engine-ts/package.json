@@ -1,0 +1,28 @@
+{
+  "name": "strategy-engine-ts",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "mempool": "ts-node src/mempool-listener.ts",
+    "arbitrage": "ts-node src/arbitrage-detector.ts",
+    "simulate": "ts-node src/bundle-simulator.ts",
+    "test": "ts-node src/test-pipeline.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "ethers": "^6.14.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3",
+    "redis": "^4.6.5",
+    "winston": "^3.11.0",
+    "dotenv": "^16.3.1",
+    "@types/node": "^20.10.0"
+  },
+  "devDependencies": {
+    "@types/redis": "^4.0.11"
+  }
+}

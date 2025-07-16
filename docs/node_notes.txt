@@ -1,0 +1,14 @@
+# docker command to run the node
+
+docker run -d --name avax \
+  -p 9650:9650 -p 9651:9651 \
+  -v /mnt/datadrive/.avalanchego:/root/.avalanchego \
+  avaplatform/avalanchego:latest \
+  /avalanchego/build/avalanchego \
+  --config-file=/root/.avalanchego/config.json
+
+
+# to see logs
+
+docker logs -f avax
+
