@@ -1,18 +1,20 @@
 {
-  "name": "strategy-engine-ts",
+  "name": "avalanche-mev-bot",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "src/index.ts",
   "scripts": {
     "start": "ts-node src/index.ts",
     "mempool": "ts-node src/mempool-listener.ts",
     "arbitrage": "ts-node src/arbitrage-detector.ts",
     "simulate": "ts-node src/bundle-simulator.ts",
-    "test": "ts-node src/test-pipeline.ts"
+    "test": "ts-node src/test-pipeline.ts",
+    "build": "tsc",
+    "dev": "ts-node --watch src/index.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": ["mev", "arbitrage", "avalanche", "defi", "blockchain", "trading", "dex"],
+  "author": "Tim Hoerner <thoerner@gmail.com>",
+  "license": "MIT",
+  "description": "A comprehensive MEV (Maximum Extractable Value) pipeline for Avalanche C-Chain with real-time arbitrage detection and bundle simulation",
   "dependencies": {
     "ethers": "^6.14.4",
     "ts-node": "^10.9.2",
